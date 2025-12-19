@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Security Groups for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+Resources:
+  # ALB Security Group
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-alb-sg
+      GroupDescription: Security group for Application Load Balancer
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS traffic
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECS Services Security Group
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-ecs-sg
+      GroupDescription: Security group for ECS services
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow traffic from ALB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ecs-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Allow ECS services to communicate with each other
+  ECSSecurityGroupSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Description: Allow inter-service communication
+
+  # Database Security Group
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-database-sg
+      GroupDescription: Security group for RDS database
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow PostgreSQL access from ECS services
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-database-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Cache Security Group
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-cache-sg
+      GroupDescription: Security group for ElastiCache
+      VpcId:
+        Fn::ImportValue: !Sub ${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow Redis access from ECS services
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-cache-sg
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  ALBSecurityGroupId:
+    Description: ALB Security Group ID
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-ALBSecurityGroupId
+
+  ECSSecurityGroupId:
+    Description: ECS Security Group ID
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSSecurityGroupId
+
+  DatabaseSecurityGroupId:
+    Description: Database Security Group ID
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+
+  CacheSecurityGroupId:
+    Description: Cache Security Group ID
+    Value: !Ref CacheSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-CacheSecurityGroupId

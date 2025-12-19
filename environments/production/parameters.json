@@ -1,0 +1,42 @@
+[
+  {
+    "ParameterKey": "DBMasterUsername",
+    "ParameterValue": "PLACEHOLDER_DB_USERNAME"
+  },
+  {
+    "ParameterKey": "DBMasterPassword",
+    "ParameterValue": "PLACEHOLDER_DB_PASSWORD"
+  },
+  {
+    "ParameterKey": "GitHubOwner",
+    "ParameterValue": "PLACEHOLDER_GITHUB_OWNER"
+  },
+  {
+    "ParameterKey": "GitHubConnectionArn",
+    "ParameterValue": "arn:aws:codestar-connections:REGION:ACCOUNT_ID:connection/PLACEHOLDER_CONNECTION_ID"
+  },
+  {
+    "ParameterKey": "Module1Repo",
+    "ParameterValue": "PLACEHOLDER_MODULE1_REPO_NAME"
+  },
+  {
+    "ParameterKey": "Module2Repo",
+    "ParameterValue": "PLACEHOLDER_MODULE2_REPO_NAME"
+  },
+  {
+    "ParameterKey": "Module3Repo",
+    "ParameterValue": "PLACEHOLDER_MODULE3_REPO_NAME"
+  },
+  {
+    "ParameterKey": "Module4Repo",
+    "ParameterValue": "PLACEHOLDER_MODULE4_REPO_NAME"
+  },
+  {
+    "ParameterKey": "CertificateArn",
+    "ParameterValue": "arn:aws:acm:REGION:ACCOUNT_ID:certificate/PLACEHOLDER_CERTIFICATE_ID"
+  },
+  {
+    "ParameterKey": "TemplateS3Bucket",
+    "ParameterValue": "PLACEHOLDER_S3_BUCKET_NAME"
+  }
+]

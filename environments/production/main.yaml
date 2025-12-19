@@ -1,0 +1,351 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Master Stack for Production Environment - Multi-Module Application
+
+Parameters:
+  # Database Parameters
+  DBMasterUsername:
+    Description: Database master username
+    Type: String
+    Default: dbadmin
+    NoEcho: true
+
+  DBMasterPassword:
+    Description: Database master password (min 8 characters)
+    Type: String
+    NoEcho: true
+    MinLength: 8
+
+  # GitHub Parameters (for CI/CD)
+  GitHubOwner:
+    Description: GitHub repository owner/organization
+    Type: String
+    Default: PLACEHOLDER_GITHUB_OWNER
+
+  GitHubConnectionArn:
+    Description: ARN of the CodeStar connection for GitHub
+    Type: String
+    Default: PLACEHOLDER_CODESTAR_CONNECTION_ARN
+
+  Module1Repo:
+    Description: GitHub repository name for Module 1
+    Type: String
+    Default: PLACEHOLDER_MODULE1_REPO
+
+  Module2Repo:
+    Description: GitHub repository name for Module 2
+    Type: String
+    Default: PLACEHOLDER_MODULE2_REPO
+
+  Module3Repo:
+    Description: GitHub repository name for Module 3
+    Type: String
+    Default: PLACEHOLDER_MODULE3_REPO
+
+  Module4Repo:
+    Description: GitHub repository name for Module 4
+    Type: String
+    Default: PLACEHOLDER_MODULE4_REPO
+
+  # SSL Certificate (required for production)
+  CertificateArn:
+    Description: ARN of SSL certificate
+    Type: String
+
+  # Template S3 Location
+  TemplateS3Bucket:
+    Description: S3 bucket containing nested CloudFormation templates
+    Type: String
+    Default: PLACEHOLDER_S3_BUCKET
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Database Configuration
+        Parameters:
+          - DBMasterUsername
+          - DBMasterPassword
+      - Label:
+          default: GitHub Configuration
+        Parameters:
+          - GitHubOwner
+          - GitHubConnectionArn
+          - Module1Repo
+          - Module2Repo
+          - Module3Repo
+          - Module4Repo
+      - Label:
+          default: SSL Configuration
+        Parameters:
+          - CertificateArn
+      - Label:
+          default: Template Location
+        Parameters:
+          - TemplateS3Bucket
+
+Resources:
+  # 1. VPC and Networking (Production uses different CIDR ranges)
+  NetworkingStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/networking/vpc.yaml
+      Parameters:
+        EnvironmentName: production
+        VpcCIDR: 10.1.0.0/16
+        PublicSubnet1CIDR: 10.1.1.0/24
+        PublicSubnet2CIDR: 10.1.2.0/24
+        PrivateSubnet1CIDR: 10.1.3.0/24
+        PrivateSubnet2CIDR: 10.1.4.0/24
+        DatabaseSubnet1CIDR: 10.1.5.0/24
+        DatabaseSubnet2CIDR: 10.1.6.0/24
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 2. Security Groups
+  SecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkingStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/networking/security-groups.yaml
+      Parameters:
+        EnvironmentName: production
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 3. Database (RDS) - Production configuration with Multi-AZ
+  DatabaseStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/database/rds.yaml
+      Parameters:
+        EnvironmentName: production
+        DBInstanceClass: db.t3.small
+        DBAllocatedStorage: '50'
+        DBName: appdb
+        DBMasterUsername: !Ref DBMasterUsername
+        DBMasterPassword: !Ref DBMasterPassword
+        MultiAZ: 'true'
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 4. Cache (ElastiCache) - Production configuration with HA
+  CacheStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cache/elasticache.yaml
+      Parameters:
+        EnvironmentName: production
+        CacheNodeType: cache.t3.small
+        NumCacheNodes: '2'
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 5. ECS Cluster
+  ECSClusterStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-cluster.yaml
+      Parameters:
+        EnvironmentName: production
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 6. Application Load Balancer (with SSL)
+  ALBStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ECSClusterStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/loadbalancer/alb.yaml
+      Parameters:
+        EnvironmentName: production
+        CertificateArn: !Ref CertificateArn
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 7. ECS Services for each module (Production configuration)
+  Module1ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: production
+        ServiceName: module-1
+        ContainerPort: '8081'
+        DesiredCount: '2'
+        CPU: '512'
+        Memory: '1024'
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/production/module-1:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module1TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module2ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: production
+        ServiceName: module-2
+        ContainerPort: '8082'
+        DesiredCount: '2'
+        CPU: '512'
+        Memory: '1024'
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/production/module-2:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module2TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module3ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: production
+        ServiceName: module-3
+        ContainerPort: '8083'
+        DesiredCount: '2'
+        CPU: '512'
+        Memory: '1024'
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/production/module-3:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module3TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module4ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: production
+        ServiceName: module-4
+        ContainerPort: '8084'
+        DesiredCount: '2'
+        CPU: '512'
+        Memory: '1024'
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/production/module-4:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module4TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: production
+
+  # 8. CI/CD Pipelines for each module (Production uses main branch)
+  Module1PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module1ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: production
+        ModuleName: module-1
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module1Repo
+        GitHubBranch: main
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8081'
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module2PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module2ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: production
+        ModuleName: module-2
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module2Repo
+        GitHubBranch: main
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8082'
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module3PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module3ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: production
+        ModuleName: module-3
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module3Repo
+        GitHubBranch: main
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8083'
+      Tags:
+        - Key: Environment
+          Value: production
+
+  Module4PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module4ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: production
+        ModuleName: module-4
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module4Repo
+        GitHubBranch: main
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8084'
+      Tags:
+        - Key: Environment
+          Value: production
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt NetworkingStack.Outputs.VpcId
+
+  LoadBalancerDNS:
+    Description: Application Load Balancer DNS Name
+    Value: !GetAtt ALBStack.Outputs.LoadBalancerDNSName
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt DatabaseStack.Outputs.DBInstanceEndpoint
+
+  CacheEndpoint:
+    Description: ElastiCache Redis Endpoint
+    Value: !GetAtt CacheStack.Outputs.CacheEndpoint
+
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt ECSClusterStack.Outputs.ClusterName

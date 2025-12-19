@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ElastiCache Redis Cluster for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  CacheNodeType:
+    Description: ElastiCache node type
+    Type: String
+    Default: cache.t3.micro
+    AllowedValues:
+      - cache.t3.micro
+      - cache.t3.small
+      - cache.t3.medium
+      - cache.r5.large
+      - cache.r5.xlarge
+
+  NumCacheNodes:
+    Description: Number of cache nodes (1 for single node, >1 for cluster)
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 6
+
+  EngineVersion:
+    Description: Redis engine version
+    Type: String
+    Default: '7.0'
+
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+  IsClusterMode: !Not [!Equals [!Ref NumCacheNodes, 1]]
+
+Resources:
+  # ElastiCache Parameter Group
+  CacheParameterGroup:
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties:
+      CacheParameterGroupFamily: redis7
+      Description: !Sub Parameter group for ${EnvironmentName} Redis cache
+      Properties:
+        maxmemory-policy: allkeys-lru
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-cache-params
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ElastiCache Replication Group (for HA)
+  CacheReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub ${EnvironmentName}-redis
+      ReplicationGroupDescription: !Sub Redis cache for ${EnvironmentName} environment
+      Engine: redis
+      EngineVersion: !Ref EngineVersion
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheClusters: !If [IsProduction, 2, !Ref NumCacheNodes]
+      AutomaticFailoverEnabled: !If [IsProduction, true, false]
+      MultiAZEnabled: !If [IsProduction, true, false]
+      CacheParameterGroupName: !Ref CacheParameterGroup
+      CacheSubnetGroupName:
+        Fn::ImportValue: !Sub ${EnvironmentName}-CacheSubnetGroupName
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-CacheSecurityGroupId
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      SnapshotRetentionLimit: !If [IsProduction, 7, 1]
+      SnapshotWindow: '03:00-05:00'
+      PreferredMaintenanceWindow: 'Mon:05:00-Mon:06:00'
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-redis
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  CacheEndpoint:
+    Description: Redis primary endpoint address
+    Value: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-CacheEndpoint
+
+  CachePort:
+    Description: Redis port
+    Value: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-CachePort
+
+  CacheReaderEndpoint:
+    Description: Redis reader endpoint address
+    Value: !GetAtt CacheReplicationGroup.ReaderEndPoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-CacheReaderEndpoint
+
+  CacheConnectionString:
+    Description: Redis connection string
+    Value: !Sub
+      - 'redis://${Endpoint}:${Port}'
+      - Endpoint: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Address
+        Port: !GetAtt CacheReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-CacheConnectionString

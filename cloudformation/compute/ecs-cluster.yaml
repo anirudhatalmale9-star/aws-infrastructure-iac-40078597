@@ -1,0 +1,275 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Cluster and Common Resources for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-cluster
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # CloudWatch Log Group for ECS
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${EnvironmentName}
+      RetentionInDays: 30
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECS Task Execution Role
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-task-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/*
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${EnvironmentName}/*
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECS Task Role (for application permissions)
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${EnvironmentName}-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApplicationPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${EnvironmentName}:*
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${EnvironmentName}/*
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # ECR Repositories for 4 modules
+  Module1Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}/module-1
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  Module2Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}/module-2
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  Module3Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}/module-3
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  Module4Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${EnvironmentName}/module-4
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSClusterName
+
+  ClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSClusterArn
+
+  ECSLogGroupName:
+    Description: CloudWatch Log Group for ECS
+    Value: !Ref ECSLogGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSLogGroupName
+
+  ECSTaskExecutionRoleArn:
+    Description: ECS Task Execution Role ARN
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSTaskExecutionRoleArn
+
+  ECSTaskRoleArn:
+    Description: ECS Task Role ARN
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-ECSTaskRoleArn
+
+  Module1RepositoryUri:
+    Description: ECR Repository URI for Module 1
+    Value: !GetAtt Module1Repository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-Module1RepositoryUri
+
+  Module2RepositoryUri:
+    Description: ECR Repository URI for Module 2
+    Value: !GetAtt Module2Repository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-Module2RepositoryUri
+
+  Module3RepositoryUri:
+    Description: ECR Repository URI for Module 3
+    Value: !GetAtt Module3Repository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-Module3RepositoryUri
+
+  Module4RepositoryUri:
+    Description: ECR Repository URI for Module 4
+    Value: !GetAtt Module4Repository.RepositoryUri
+    Export:
+      Name: !Sub ${EnvironmentName}-Module4RepositoryUri

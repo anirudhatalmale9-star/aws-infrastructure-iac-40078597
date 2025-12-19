@@ -1,0 +1,49 @@
+version: 0.2
+
+# AWS CodeBuild buildspec for containerized application
+# This file should be placed in the root of each module's repository
+
+env:
+  variables:
+    # These will be overridden by CodeBuild environment variables
+    DOCKER_BUILDKIT: "1"
+
+phases:
+  pre_build:
+    commands:
+      - echo "=== PRE-BUILD PHASE ==="
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+      - echo "Setting image tag..."
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo "Image will be tagged as: $ECR_REPOSITORY_URI:$IMAGE_TAG"
+
+  build:
+    commands:
+      - echo "=== BUILD PHASE ==="
+      - echo "Build started on $(date)"
+      - echo "Building Docker image..."
+      - docker build -t $ECR_REPOSITORY_URI:latest .
+      - docker tag $ECR_REPOSITORY_URI:latest $ECR_REPOSITORY_URI:$IMAGE_TAG
+      - echo "Build completed successfully"
+
+  post_build:
+    commands:
+      - echo "=== POST-BUILD PHASE ==="
+      - echo "Pushing Docker images to ECR..."
+      - docker push $ECR_REPOSITORY_URI:latest
+      - docker push $ECR_REPOSITORY_URI:$IMAGE_TAG
+      - echo "Writing image definitions file..."
+      - printf '[{"name":"%s","imageUri":"%s"}]' $MODULE_NAME $ECR_REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - cat imagedefinitions.json
+      - echo "Post-build completed on $(date)"
+
+artifacts:
+  files:
+    - imagedefinitions.json
+  discard-paths: yes
+
+cache:
+  paths:
+    - '/root/.docker/**/*'

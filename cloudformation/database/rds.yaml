@@ -1,0 +1,149 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS PostgreSQL Database for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  DBInstanceClass:
+    Description: Database instance type
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+      - db.r5.large
+      - db.r5.xlarge
+
+  DBAllocatedStorage:
+    Description: Database storage size in GB
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+
+  DBName:
+    Description: Database name
+    Type: String
+    Default: appdb
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters
+
+  DBMasterUsername:
+    Description: Database master username
+    Type: String
+    Default: dbadmin
+    NoEcho: true
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters
+
+  DBMasterPassword:
+    Description: Database master password (min 8 characters)
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 128
+    AllowedPattern: '[a-zA-Z0-9!@#$%^&*()_+-=]*'
+    ConstraintDescription: Must contain only alphanumeric and special characters
+
+  MultiAZ:
+    Description: Enable Multi-AZ deployment
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+
+Resources:
+  # Database Parameter Group
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub Parameter group for ${EnvironmentName} PostgreSQL database
+      Family: postgres15
+      Parameters:
+        log_statement: all
+        log_min_duration_statement: 1000
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-params
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # RDS Instance
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-database
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: '15.4'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DBSubnetGroupName:
+        Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSubnetGroupName
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub ${EnvironmentName}-DatabaseSecurityGroupId
+      DBParameterGroupName: !Ref DBParameterGroup
+      MultiAZ: !If [IsProduction, true, !Ref MultiAZ]
+      BackupRetentionPeriod: !If [IsProduction, 7, 1]
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'Mon:04:00-Mon:05:00'
+      AutoMinorVersionUpgrade: true
+      PubliclyAccessible: false
+      DeletionProtection: !If [IsProduction, true, false]
+      EnablePerformanceInsights: !If [IsProduction, true, false]
+      CopyTagsToSnapshot: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-database
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  DBInstanceEndpoint:
+    Description: Database endpoint address
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${EnvironmentName}-DBEndpoint
+
+  DBInstancePort:
+    Description: Database port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-DBPort
+
+  DBInstanceIdentifier:
+    Description: Database instance identifier
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub ${EnvironmentName}-DBInstanceId
+
+  DatabaseConnectionString:
+    Description: Database connection string template (replace password)
+    Value: !Sub
+      - 'postgresql://${DBMasterUsername}:PASSWORD@${Endpoint}:${Port}/${DBName}'
+      - Endpoint: !GetAtt DBInstance.Endpoint.Address
+        Port: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${EnvironmentName}-DBConnectionString
