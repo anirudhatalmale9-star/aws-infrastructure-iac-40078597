@@ -93,7 +93,7 @@ Resources:
       DBInstanceIdentifier: !Sub ${EnvironmentName}-database
       DBName: !Ref DBName
       Engine: postgres
-      EngineVersion: '15.4'
+      EngineVersion: '15.15'
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: !Ref DBAllocatedStorage
       StorageType: gp3
