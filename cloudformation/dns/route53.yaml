@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Route53 DNS Records for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  HostedZoneId:
+    Description: Route53 Hosted Zone ID
+    Type: String
+
+  DomainName:
+    Description: Base domain name (e.g., example.com)
+    Type: String
+
+  CreateSubdomainRecords:
+    Description: Create subdomain records for each module
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  CreateSubdomains: !Equals [!Ref CreateSubdomainRecords, 'true']
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+
+Resources:
+  # Main Application Record (app.example.com or staging.example.com)
+  MainALBRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !If
+        - IsProduction
+        - !Sub 'app.${DomainName}'
+        - !Sub 'staging.${DomainName}'
+      Type: A
+      AliasTarget:
+        DNSName:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBDNSName
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBHostedZoneId
+        EvaluateTargetHealth: true
+
+  # Module 1 Subdomain Record
+  Module1Record:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomains
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !If
+        - IsProduction
+        - !Sub 'm1.${DomainName}'
+        - !Sub 'm1-staging.${DomainName}'
+      Type: A
+      AliasTarget:
+        DNSName:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBDNSName
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBHostedZoneId
+        EvaluateTargetHealth: true
+
+  # Module 2 Subdomain Record
+  Module2Record:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomains
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !If
+        - IsProduction
+        - !Sub 'm2.${DomainName}'
+        - !Sub 'm2-staging.${DomainName}'
+      Type: A
+      AliasTarget:
+        DNSName:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBDNSName
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBHostedZoneId
+        EvaluateTargetHealth: true
+
+  # Module 3 Subdomain Record
+  Module3Record:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomains
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !If
+        - IsProduction
+        - !Sub 'm3.${DomainName}'
+        - !Sub 'm3-staging.${DomainName}'
+      Type: A
+      AliasTarget:
+        DNSName:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBDNSName
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBHostedZoneId
+        EvaluateTargetHealth: true
+
+  # Module 4 Subdomain Record
+  Module4Record:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateSubdomains
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !If
+        - IsProduction
+        - !Sub 'm4.${DomainName}'
+        - !Sub 'm4-staging.${DomainName}'
+      Type: A
+      AliasTarget:
+        DNSName:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBDNSName
+        HostedZoneId:
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBHostedZoneId
+        EvaluateTargetHealth: true
+
+Outputs:
+  MainDomainName:
+    Description: Main application domain name
+    Value: !If
+      - IsProduction
+      - !Sub 'app.${DomainName}'
+      - !Sub 'staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-MainDomainName
+
+  Module1DomainName:
+    Description: Module 1 domain name
+    Condition: CreateSubdomains
+    Value: !If
+      - IsProduction
+      - !Sub 'm1.${DomainName}'
+      - !Sub 'm1-staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-Module1DomainName
+
+  Module2DomainName:
+    Description: Module 2 domain name
+    Condition: CreateSubdomains
+    Value: !If
+      - IsProduction
+      - !Sub 'm2.${DomainName}'
+      - !Sub 'm2-staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-Module2DomainName
+
+  Module3DomainName:
+    Description: Module 3 domain name
+    Condition: CreateSubdomains
+    Value: !If
+      - IsProduction
+      - !Sub 'm3.${DomainName}'
+      - !Sub 'm3-staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-Module3DomainName
+
+  Module4DomainName:
+    Description: Module 4 domain name
+    Condition: CreateSubdomains
+    Value: !If
+      - IsProduction
+      - !Sub 'm4.${DomainName}'
+      - !Sub 'm4-staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-Module4DomainName

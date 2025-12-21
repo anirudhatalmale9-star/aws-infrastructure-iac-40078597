@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ACM Certificate with DNS Validation for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  DomainName:
+    Description: Base domain name (e.g., example.com)
+    Type: String
+
+  HostedZoneId:
+    Description: Route53 Hosted Zone ID for DNS validation
+    Type: String
+
+  IncludeWildcard:
+    Description: Include wildcard certificate (*.domain.com)
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Conditions:
+  AddWildcard: !Equals [!Ref IncludeWildcard, 'true']
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !If
+        - IsProduction
+        - !Sub 'app.${DomainName}'
+        - !Sub 'staging.${DomainName}'
+      SubjectAlternativeNames:
+        - !If
+          - AddWildcard
+          - !If
+            - IsProduction
+            - !Sub '*.${DomainName}'
+            - !Sub '*-staging.${DomainName}'
+          - !Ref AWS::NoValue
+        - !If
+          - IsProduction
+          - !Sub 'm1.${DomainName}'
+          - !Sub 'm1-staging.${DomainName}'
+        - !If
+          - IsProduction
+          - !Sub 'm2.${DomainName}'
+          - !Sub 'm2-staging.${DomainName}'
+        - !If
+          - IsProduction
+          - !Sub 'm3.${DomainName}'
+          - !Sub 'm3-staging.${DomainName}'
+        - !If
+          - IsProduction
+          - !Sub 'm4.${DomainName}'
+          - !Sub 'm4-staging.${DomainName}'
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !If
+            - IsProduction
+            - !Sub 'app.${DomainName}'
+            - !Sub 'staging.${DomainName}'
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-certificate
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  CertificateArn:
+    Description: ACM Certificate ARN
+    Value: !Ref Certificate
+    Export:
+      Name: !Sub ${EnvironmentName}-CertificateArn
+
+  CertificateDomainName:
+    Description: Primary domain name on the certificate
+    Value: !If
+      - IsProduction
+      - !Sub 'app.${DomainName}'
+      - !Sub 'staging.${DomainName}'
+    Export:
+      Name: !Sub ${EnvironmentName}-CertificateDomainName

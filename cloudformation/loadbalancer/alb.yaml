@@ -266,6 +266,12 @@ Outputs:
     Export:
       Name: !Sub ${EnvironmentName}-ALBArn
 
+  LoadBalancerFullName:
+    Description: Full name of the load balancer for CloudWatch metrics
+    Value: !GetAtt ApplicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: !Sub ${EnvironmentName}-ALBFullName
+
   LoadBalancerHostedZoneId:
     Description: Hosted zone ID of the load balancer
     Value: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID

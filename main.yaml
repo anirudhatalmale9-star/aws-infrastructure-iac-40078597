@@ -1,0 +1,613 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Root CloudFormation Stack for Multi-Module Application Infrastructure.
+  This single template deploys the complete infrastructure using nested stacks.
+  Supports both staging and production environments via the EnvironmentName parameter.
+
+Parameters:
+  # Environment Selection
+  EnvironmentName:
+    Description: Environment to deploy (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  # Template Location
+  TemplateS3Bucket:
+    Description: S3 bucket containing nested CloudFormation templates
+    Type: String
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]*[a-z0-9]$
+    ConstraintDescription: Must be a valid S3 bucket name
+
+  # Database Configuration
+  DBMasterUsername:
+    Description: Database master username
+    Type: String
+    Default: dbadmin
+    NoEcho: true
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBMasterPassword:
+    Description: Database master password (min 8 characters)
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 128
+
+  # DNS Configuration (Optional)
+  HostedZoneId:
+    Description: Route53 Hosted Zone ID (leave empty to skip DNS setup)
+    Type: String
+    Default: ''
+
+  DomainName:
+    Description: Base domain name, e.g., example.com (required if HostedZoneId is provided)
+    Type: String
+    Default: ''
+
+  # SSL Configuration (Optional)
+  CertificateArn:
+    Description: Existing ACM Certificate ARN (leave empty to create new certificate, requires HostedZoneId)
+    Type: String
+    Default: ''
+
+  CreateCertificate:
+    Description: Create new ACM certificate (requires HostedZoneId and DomainName)
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+  # GitHub/CI-CD Configuration
+  GitHubOwner:
+    Description: GitHub repository owner/organization
+    Type: String
+
+  GitHubConnectionArn:
+    Description: ARN of the CodeStar connection for GitHub
+    Type: String
+
+  Module1Repo:
+    Description: GitHub repository name for Module 1
+    Type: String
+
+  Module2Repo:
+    Description: GitHub repository name for Module 2
+    Type: String
+
+  Module3Repo:
+    Description: GitHub repository name for Module 3
+    Type: String
+
+  Module4Repo:
+    Description: GitHub repository name for Module 4
+    Type: String
+
+  # Monitoring Configuration
+  AlarmEmail:
+    Description: Email address for alarm notifications (optional)
+    Type: String
+    Default: ''
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment Configuration
+        Parameters:
+          - EnvironmentName
+          - TemplateS3Bucket
+      - Label:
+          default: Database Configuration
+        Parameters:
+          - DBMasterUsername
+          - DBMasterPassword
+      - Label:
+          default: DNS Configuration (Optional)
+        Parameters:
+          - HostedZoneId
+          - DomainName
+          - CertificateArn
+          - CreateCertificate
+      - Label:
+          default: GitHub/CI-CD Configuration
+        Parameters:
+          - GitHubOwner
+          - GitHubConnectionArn
+          - Module1Repo
+          - Module2Repo
+          - Module3Repo
+          - Module4Repo
+      - Label:
+          default: Monitoring Configuration
+        Parameters:
+          - AlarmEmail
+    ParameterLabels:
+      EnvironmentName:
+        default: Environment
+      TemplateS3Bucket:
+        default: S3 Bucket for Templates
+      DBMasterUsername:
+        default: Database Username
+      DBMasterPassword:
+        default: Database Password
+      HostedZoneId:
+        default: Route53 Hosted Zone ID
+      DomainName:
+        default: Domain Name
+      CertificateArn:
+        default: Existing Certificate ARN
+      CreateCertificate:
+        default: Create New Certificate
+      GitHubOwner:
+        default: GitHub Owner
+      GitHubConnectionArn:
+        default: GitHub Connection ARN
+      AlarmEmail:
+        default: Alarm Notification Email
+
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+  HasHostedZone: !Not [!Equals [!Ref HostedZoneId, '']]
+  HasDomain: !Not [!Equals [!Ref DomainName, '']]
+  ShouldCreateCertificate: !And
+    - !Equals [!Ref CreateCertificate, 'true']
+    - !Condition HasHostedZone
+    - !Condition HasDomain
+  HasExistingCertificate: !Not [!Equals [!Ref CertificateArn, '']]
+  UseCertificate: !Or
+    - !Condition ShouldCreateCertificate
+    - !Condition HasExistingCertificate
+  CreateDNSRecords: !And
+    - !Condition HasHostedZone
+    - !Condition HasDomain
+
+Resources:
+  # ============================================
+  # 1. NETWORKING
+  # ============================================
+  NetworkingStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/networking/vpc.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        VpcCIDR: !If [IsProduction, '10.1.0.0/16', '10.0.0.0/16']
+        PublicSubnet1CIDR: !If [IsProduction, '10.1.1.0/24', '10.0.1.0/24']
+        PublicSubnet2CIDR: !If [IsProduction, '10.1.2.0/24', '10.0.2.0/24']
+        PrivateSubnet1CIDR: !If [IsProduction, '10.1.3.0/24', '10.0.3.0/24']
+        PrivateSubnet2CIDR: !If [IsProduction, '10.1.4.0/24', '10.0.4.0/24']
+        DatabaseSubnet1CIDR: !If [IsProduction, '10.1.5.0/24', '10.0.5.0/24']
+        DatabaseSubnet2CIDR: !If [IsProduction, '10.1.6.0/24', '10.0.6.0/24']
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Networking
+
+  # ============================================
+  # 2. SECURITY GROUPS
+  # ============================================
+  SecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkingStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/networking/security-groups.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Security
+
+  # ============================================
+  # 3. ACM CERTIFICATE (Optional)
+  # ============================================
+  CertificateStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldCreateCertificate
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/dns/acm-certificate.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DomainName: !Ref DomainName
+        HostedZoneId: !Ref HostedZoneId
+        IncludeWildcard: 'true'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Certificate
+
+  # ============================================
+  # 4. DATABASE (RDS)
+  # ============================================
+  DatabaseStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/database/rds.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DBInstanceClass: !If [IsProduction, 'db.t3.small', 'db.t3.micro']
+        DBAllocatedStorage: !If [IsProduction, '50', '20']
+        DBName: appdb
+        DBMasterUsername: !Ref DBMasterUsername
+        DBMasterPassword: !Ref DBMasterPassword
+        MultiAZ: !If [IsProduction, 'true', 'false']
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Database
+
+  # ============================================
+  # 5. CACHE (ElastiCache Redis)
+  # ============================================
+  CacheStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cache/elasticache.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        CacheNodeType: !If [IsProduction, 'cache.t3.small', 'cache.t3.micro']
+        NumCacheNodes: !If [IsProduction, '2', '1']
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Cache
+
+  # ============================================
+  # 6. ECS CLUSTER
+  # ============================================
+  ECSClusterStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-cluster.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Compute
+
+  # ============================================
+  # 7. APPLICATION LOAD BALANCER
+  # ============================================
+  ALBStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/loadbalancer/alb.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        CertificateArn: !If
+          - ShouldCreateCertificate
+          - !GetAtt CertificateStack.Outputs.CertificateArn
+          - !If
+            - HasExistingCertificate
+            - !Ref CertificateArn
+            - ''
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: LoadBalancer
+
+  # ============================================
+  # 8. ECS SERVICES (4 Modules)
+  # ============================================
+  Module1ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ServiceName: module-1
+        ContainerPort: '8081'
+        DesiredCount: !If [IsProduction, '2', '1']
+        CPU: !If [IsProduction, '512', '256']
+        Memory: !If [IsProduction, '1024', '512']
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}/module-1:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module1TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Service
+        - Key: Module
+          Value: module-1
+
+  Module2ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ServiceName: module-2
+        ContainerPort: '8082'
+        DesiredCount: !If [IsProduction, '2', '1']
+        CPU: !If [IsProduction, '512', '256']
+        Memory: !If [IsProduction, '1024', '512']
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}/module-2:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module2TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Service
+        - Key: Module
+          Value: module-2
+
+  Module3ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ServiceName: module-3
+        ContainerPort: '8083'
+        DesiredCount: !If [IsProduction, '2', '1']
+        CPU: !If [IsProduction, '512', '256']
+        Memory: !If [IsProduction, '1024', '512']
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}/module-3:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module3TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Service
+        - Key: Module
+          Value: module-3
+
+  Module4ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/compute/ecs-service.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ServiceName: module-4
+        ContainerPort: '8084'
+        DesiredCount: !If [IsProduction, '2', '1']
+        CPU: !If [IsProduction, '512', '256']
+        Memory: !If [IsProduction, '1024', '512']
+        ImageUri: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}/module-4:latest
+        HealthCheckPath: /health
+        TargetGroupArn: !GetAtt ALBStack.Outputs.Module4TargetGroupArn
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Service
+        - Key: Module
+          Value: module-4
+
+  # ============================================
+  # 9. CI/CD PIPELINES (4 Modules)
+  # ============================================
+  Module1PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module1ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ModuleName: module-1
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module1Repo
+        GitHubBranch: !If [IsProduction, 'main', 'develop']
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8081'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: CICD
+        - Key: Module
+          Value: module-1
+
+  Module2PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module2ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ModuleName: module-2
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module2Repo
+        GitHubBranch: !If [IsProduction, 'main', 'develop']
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8082'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: CICD
+        - Key: Module
+          Value: module-2
+
+  Module3PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module3ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ModuleName: module-3
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module3Repo
+        GitHubBranch: !If [IsProduction, 'main', 'develop']
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8083'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: CICD
+        - Key: Module
+          Value: module-3
+
+  Module4PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Module4ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/cicd/codepipeline.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ModuleName: module-4
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref Module4Repo
+        GitHubBranch: !If [IsProduction, 'main', 'develop']
+        GitHubConnectionArn: !Ref GitHubConnectionArn
+        ContainerPort: '8084'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: CICD
+        - Key: Module
+          Value: module-4
+
+  # ============================================
+  # 10. MONITORING AND ALARMS
+  # ============================================
+  MonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/monitoring/cloudwatch-alarms.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        AlarmEmail: !Ref AlarmEmail
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: Monitoring
+
+  # ============================================
+  # 11. DNS RECORDS (Optional)
+  # ============================================
+  Route53Stack:
+    Type: AWS::CloudFormation::Stack
+    Condition: CreateDNSRecords
+    DependsOn: ALBStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/dns/route53.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        HostedZoneId: !Ref HostedZoneId
+        DomainName: !Ref DomainName
+        CreateSubdomainRecords: 'true'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Component
+          Value: DNS
+
+Outputs:
+  EnvironmentName:
+    Description: Deployed environment name
+    Value: !Ref EnvironmentName
+
+  VpcId:
+    Description: VPC ID
+    Value: !GetAtt NetworkingStack.Outputs.VpcId
+
+  LoadBalancerDNS:
+    Description: Application Load Balancer DNS Name
+    Value: !GetAtt ALBStack.Outputs.LoadBalancerDNSName
+
+  LoadBalancerUrl:
+    Description: Application URL (HTTP)
+    Value: !Sub http://${ALBStack.Outputs.LoadBalancerDNSName}
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt DatabaseStack.Outputs.DBInstanceEndpoint
+
+  DatabasePort:
+    Description: RDS Database Port
+    Value: !GetAtt DatabaseStack.Outputs.DBInstancePort
+
+  CacheEndpoint:
+    Description: ElastiCache Redis Endpoint
+    Value: !GetAtt CacheStack.Outputs.CacheEndpoint
+
+  CachePort:
+    Description: ElastiCache Redis Port
+    Value: !GetAtt CacheStack.Outputs.CachePort
+
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt ECSClusterStack.Outputs.ClusterName
+
+  ECSClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSClusterStack.Outputs.ClusterArn
+
+  Module1ECRRepository:
+    Description: ECR Repository URI for Module 1
+    Value: !GetAtt ECSClusterStack.Outputs.Module1RepositoryUri
+
+  Module2ECRRepository:
+    Description: ECR Repository URI for Module 2
+    Value: !GetAtt ECSClusterStack.Outputs.Module2RepositoryUri
+
+  Module3ECRRepository:
+    Description: ECR Repository URI for Module 3
+    Value: !GetAtt ECSClusterStack.Outputs.Module3RepositoryUri
+
+  Module4ECRRepository:
+    Description: ECR Repository URI for Module 4
+    Value: !GetAtt ECSClusterStack.Outputs.Module4RepositoryUri
+
+  CloudWatchDashboardUrl:
+    Description: CloudWatch Dashboard URL
+    Value: !GetAtt MonitoringStack.Outputs.DashboardUrl
+
+  ApplicationDomain:
+    Description: Application Domain Name (if Route53 configured)
+    Condition: CreateDNSRecords
+    Value: !GetAtt Route53Stack.Outputs.MainDomainName
+
+  CertificateArn:
+    Description: ACM Certificate ARN (if created)
+    Condition: ShouldCreateCertificate
+    Value: !GetAtt CertificateStack.Outputs.CertificateArn

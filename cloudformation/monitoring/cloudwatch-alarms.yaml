@@ -101,7 +101,7 @@ Resources:
       Dimensions:
         - Name: LoadBalancer
           Value:
-            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBFullName
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
@@ -122,7 +122,7 @@ Resources:
       Dimensions:
         - Name: LoadBalancer
           Value:
-            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBFullName
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -143,7 +143,7 @@ Resources:
       Dimensions:
         - Name: LoadBalancer
           Value:
-            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBFullName
       Statistic: Average
       Period: 60
       EvaluationPeriods: 2
