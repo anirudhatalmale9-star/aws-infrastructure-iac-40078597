@@ -1,0 +1,477 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudWatch Alarms and Monitoring for Multi-Module Application
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name (staging or production)
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+    Default: staging
+
+  AlarmEmail:
+    Description: Email address for alarm notifications (optional)
+    Type: String
+    Default: ''
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  IsProduction: !Equals [!Ref EnvironmentName, 'production']
+
+Resources:
+  # SNS Topic for Alarms
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${EnvironmentName}-infrastructure-alarms
+      DisplayName: !Sub ${EnvironmentName} Infrastructure Alarms
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # ============================================
+  # ECS Service Alarms
+  # ============================================
+
+  # ECS CPU Utilization Alarm (High)
+  ECSCPUHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-ecs-cpu-high
+      AlarmDescription: ECS cluster CPU utilization is above 80%
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${EnvironmentName}-cluster
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ECS Memory Utilization Alarm (High)
+  ECSMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-ecs-memory-high
+      AlarmDescription: ECS cluster memory utilization is above 80%
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - Name: ClusterName
+          Value: !Sub ${EnvironmentName}-cluster
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ============================================
+  # ALB Alarms
+  # ============================================
+
+  # ALB Target Response Time Alarm
+  ALBResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-response-time-high
+      AlarmDescription: ALB target response time is above 2 seconds
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions:
+        - Name: LoadBalancer
+          Value:
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ALB 5XX Error Rate Alarm
+  ALB5XXErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-5xx-errors
+      AlarmDescription: ALB 5XX error rate is above threshold
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - Name: LoadBalancer
+          Value:
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !If [IsProduction, 10, 50]
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ALB Unhealthy Hosts Alarm
+  ALBUnhealthyHostsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-alb-unhealthy-hosts
+      AlarmDescription: ALB has unhealthy hosts
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - Name: LoadBalancer
+          Value:
+            Fn::ImportValue: !Sub ${EnvironmentName}-ALBArn
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ============================================
+  # RDS Alarms
+  # ============================================
+
+  # RDS CPU Utilization Alarm
+  RDSCPUHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-rds-cpu-high
+      AlarmDescription: RDS CPU utilization is above 80%
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub ${EnvironmentName}-database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # RDS Free Storage Space Alarm
+  RDSStorageLowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-rds-storage-low
+      AlarmDescription: RDS free storage space is below 2GB
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub ${EnvironmentName}-database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2147483648  # 2GB in bytes
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # RDS Database Connections Alarm
+  RDSConnectionsHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-rds-connections-high
+      AlarmDescription: RDS database connections are above 80% of max
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub ${EnvironmentName}-database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If [IsProduction, 80, 40]
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # RDS Read Latency Alarm
+  RDSReadLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-rds-read-latency-high
+      AlarmDescription: RDS read latency is above 20ms
+      Namespace: AWS/RDS
+      MetricName: ReadLatency
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub ${EnvironmentName}-database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0.02  # 20ms in seconds
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ============================================
+  # ElastiCache (Redis) Alarms
+  # ============================================
+
+  # Redis CPU Utilization Alarm
+  RedisCPUHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-redis-cpu-high
+      AlarmDescription: Redis CPU utilization is above 80%
+      Namespace: AWS/ElastiCache
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Sub ${EnvironmentName}-redis
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # Redis Memory Usage Alarm
+  RedisMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-redis-memory-high
+      AlarmDescription: Redis memory usage is above 80%
+      Namespace: AWS/ElastiCache
+      MetricName: DatabaseMemoryUsagePercentage
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Sub ${EnvironmentName}-redis
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # Redis Evictions Alarm
+  RedisEvictionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-redis-evictions
+      AlarmDescription: Redis is evicting keys (memory pressure)
+      Namespace: AWS/ElastiCache
+      MetricName: Evictions
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Sub ${EnvironmentName}-redis
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlarmTopic
+      TreatMissingData: notBreaching
+
+  # ============================================
+  # CloudWatch Dashboard
+  # ============================================
+
+  InfrastructureDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${EnvironmentName}-infrastructure-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 1,
+              "properties": {
+                "markdown": "# ${EnvironmentName} Infrastructure Dashboard"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 1,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "ECS CPU Utilization",
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", "ClusterName", "${EnvironmentName}-cluster"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 1,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "ECS Memory Utilization",
+                "metrics": [
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${EnvironmentName}-cluster"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 1,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "ALB Request Count",
+                "metrics": [
+                  ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${EnvironmentName}-alb"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 7,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "RDS CPU Utilization",
+                "metrics": [
+                  ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${EnvironmentName}-database"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 7,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "RDS Connections",
+                "metrics": [
+                  ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${EnvironmentName}-database"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 7,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "Redis CPU & Memory",
+                "metrics": [
+                  ["AWS/ElastiCache", "CPUUtilization", "CacheClusterId", "${EnvironmentName}-redis"],
+                  ["AWS/ElastiCache", "DatabaseMemoryUsagePercentage", "CacheClusterId", "${EnvironmentName}-redis"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 13,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "ALB Response Time",
+                "metrics": [
+                  ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${EnvironmentName}-alb"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Average"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 13,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "ALB HTTP Errors",
+                "metrics": [
+                  ["AWS/ApplicationELB", "HTTPCode_ELB_4XX_Count", "LoadBalancer", "${EnvironmentName}-alb"],
+                  ["AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", "${EnvironmentName}-alb"]
+                ],
+                "region": "${AWS::Region}",
+                "period": 60,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  AlarmTopicArn:
+    Description: SNS Topic ARN for infrastructure alarms
+    Value: !Ref AlarmTopic
+    Export:
+      Name: !Sub ${EnvironmentName}-AlarmTopicArn
+
+  DashboardName:
+    Description: CloudWatch Dashboard name
+    Value: !Ref InfrastructureDashboard
+    Export:
+      Name: !Sub ${EnvironmentName}-DashboardName
+
+  DashboardUrl:
+    Description: URL to the CloudWatch Dashboard
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${EnvironmentName}-infrastructure-dashboard

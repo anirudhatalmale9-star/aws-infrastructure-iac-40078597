@@ -51,9 +51,11 @@ This repository contains CloudFormation templates for deploying a complete AWS i
 │   │   └── ecs-service.yaml      # ECS service template (reusable)
 │   ├── loadbalancer/
 │   │   └── alb.yaml              # Application Load Balancer, target groups
-│   └── cicd/
-│       ├── codepipeline.yaml     # CI/CD pipeline template (reusable)
-│       └── buildspec.yaml        # CodeBuild build specification
+│   ├── cicd/
+│   │   ├── codepipeline.yaml     # CI/CD pipeline template (reusable)
+│   │   └── buildspec.yaml        # CodeBuild build specification
+│   └── monitoring/
+│       └── cloudwatch-alarms.yaml # CloudWatch alarms and dashboard
 ├── environments/
 │   ├── staging/
 │   │   ├── main.yaml             # Master stack for staging
@@ -99,6 +101,14 @@ This repository contains CloudFormation templates for deploying a complete AWS i
 - **CodePipeline**: Source -> Build -> Deploy
 - **CodeBuild**: Docker image building
 - **GitHub Integration**: Via CodeStar Connections
+
+### Monitoring & Alarms
+- **CloudWatch Dashboard**: Consolidated view of all infrastructure metrics
+- **SNS Topic**: Alarm notifications (email subscription optional)
+- **ECS Alarms**: CPU and memory utilization alerts
+- **ALB Alarms**: Response time, 5XX errors, unhealthy hosts
+- **RDS Alarms**: CPU, storage, connections, read latency
+- **Redis Alarms**: CPU, memory usage, evictions
 
 ## Environment Differences
 

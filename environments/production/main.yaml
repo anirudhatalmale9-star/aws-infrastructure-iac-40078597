@@ -329,6 +329,23 @@ Resources:
         - Key: Environment
           Value: production
 
+  # 9. Monitoring and Alarms
+  MonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - ALBStack
+      - DatabaseStack
+      - CacheStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateS3Bucket}.s3.amazonaws.com/cloudformation/monitoring/cloudwatch-alarms.yaml
+      Parameters:
+        EnvironmentName: production
+        AlarmEmail: ''
+      Tags:
+        - Key: Environment
+          Value: production
+
 Outputs:
   VpcId:
     Description: VPC ID
